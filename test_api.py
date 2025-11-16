@@ -88,8 +88,47 @@ def test_url_shortener():
         print(f"FAILED ✗ - {e}")
     print()
     
-    # Test 6: Test redirect (informational only)
-    print("Test 6: Testing redirect (manual verification)")
+    # Test 6: Bulk shortening
+    print("Test 6: Bulk URL shortening")
+    print("-" * 60)
+    try:
+        bulk_urls = [
+            "https://docs.python.org/3/",
+            "https://flask.palletsprojects.com/",
+            "https://requests.readthedocs.io/"
+        ]
+        bulk_result = client.bulk_shorten(bulk_urls)
+        print(f"✓ Processed {bulk_result['total_processed']} URLs")
+        print(f"✓ New URLs: {bulk_result['new_urls']}")
+        print(f"✓ Existing URLs: {bulk_result['existing_urls']}")
+        print(f"✓ Errors: {bulk_result['errors']}")
+        
+        for i, result in enumerate(bulk_result['results'][:3]):
+            if 'short_url' in result:
+                print(f"  - {bulk_urls[i]} -> {result['short_url']}")
+            else:
+                print(f"  - {bulk_urls[i]} -> ERROR: {result.get('error', 'Unknown error')}")
+        print("PASSED ✓")
+    except Exception as e:
+        print(f"FAILED ✗ - {e}")
+    print()
+    
+    # Test 7: Convenience bulk method
+    print("Test 7: Convenience bulk method")
+    print("-" * 60)
+    try:
+        convenience_urls = ["https://github.com", "https://stackoverflow.com"]
+        short_urls = client.get_short_urls(convenience_urls)
+        print(f"✓ Got {len(short_urls)} shortened URLs")
+        for i, short_url in enumerate(short_urls):
+            print(f"  - {convenience_urls[i]} -> {short_url}")
+        print("PASSED ✓")
+    except Exception as e:
+        print(f"FAILED ✗ - {e}")
+    print()
+    
+    # Test 8: Test redirect (informational only)
+    print("Test 8: Testing redirect (manual verification)")
     print("-" * 60)
     print(f"Visit {short_url} in your browser")
     print(f"It should redirect to: {test_url}")

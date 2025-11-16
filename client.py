@@ -111,6 +111,32 @@ class URLShortenerClient:
         response.raise_for_status()
         return response.json()
     
+    def bulk_shorten(self, urls: List[str]) -> Dict:
+        """
+        Shorten multiple URLs at once
+        
+        Args:
+            urls: List of URLs to shorten
+            
+        Returns:
+            Dict containing:
+                - results: List of shortened URL results
+                - total_processed: Number of URLs processed
+                - new_urls: Number of new URLs created
+                - existing_urls: Number of existing URLs found
+                - errors: Number of URLs with errors
+                
+        Raises:
+            requests.exceptions.RequestException: If the request fails
+        """
+        response = requests.post(
+            f"{self.api_base}/bulk-shorten",
+            json={'urls': urls},
+            timeout=30  # Longer timeout for bulk operations
+        )
+        response.raise_for_status()
+        return response.json()
+    
     def get_short_url(self, url: str) -> str:
         """
         Convenience method to get just the shortened URL string
@@ -123,6 +149,19 @@ class URLShortenerClient:
         """
         result = self.shorten(url)
         return result['short_url']
+    
+    def get_short_urls(self, urls: List[str]) -> List[str]:
+        """
+        Convenience method to get just the shortened URL strings from bulk operation
+        
+        Args:
+            urls: List of URLs to shorten
+            
+        Returns:
+            List of shortened URL strings (in same order as input)
+        """
+        result = self.bulk_shorten(urls)
+        return [r.get('short_url', '') for r in result['results']]
 
 
 # Example usage

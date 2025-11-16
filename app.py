@@ -124,6 +124,80 @@ def list_urls():
     
     return jsonify(urls)
 
+@app.route('/api/bulk-shorten', methods=['POST'])
+def bulk_shorten_urls():
+    """API endpoint to shorten multiple URLs at once - internal use only"""
+    data = request.get_json()
+    
+    if not data or 'urls' not in data:
+        return jsonify({'error': 'URLs list is required'}), 400
+    
+    if not isinstance(data['urls'], list):
+        return jsonify({'error': 'URLs must be a list'}), 400
+    
+    if len(data['urls']) == 0:
+        return jsonify({'error': 'URLs list cannot be empty'}), 400
+    
+    if len(data['urls']) > 100:  # Limit to prevent abuse
+        return jsonify({'error': 'Maximum 100 URLs allowed per request'}), 400
+    
+    results = []
+    
+    for original_url in data['urls']:
+        if not isinstance(original_url, str):
+            results.append({
+                'original_url': original_url,
+                'error': 'URL must be a string'
+            })
+            continue
+        
+        # Validate URL format
+        if not original_url.startswith(('http://', 'https://')):
+            original_url = 'https://' + original_url
+        
+        # Check if URL already exists
+        existing_code = None
+        for code, info in url_database.items():
+            if info['original_url'] == original_url:
+                existing_code = code
+                break
+        
+        if existing_code:
+            results.append({
+                'short_url': f"{BASE_URL}/{existing_code}",
+                'short_code': existing_code,
+                'original_url': original_url,
+                'existing': True
+            })
+        else:
+            # Generate new short code
+            short_code = generate_short_code()
+            
+            # Store URL mapping
+            url_database[short_code] = {
+                'original_url': original_url,
+                'created_at': datetime.now().isoformat(),
+                'clicks': 0
+            }
+            
+            results.append({
+                'short_url': f"{BASE_URL}/{short_code}",
+                'short_code': short_code,
+                'original_url': original_url,
+                'existing': False
+            })
+    
+    # Save all changes at once
+    save_urls(url_database)
+    
+    return jsonify({
+        'results': results,
+        'total_processed': len(results),
+        'new_urls': len([r for r in results if not r.get('existing', False) and 'error' not in r]),
+        'existing_urls': len([r for r in results if r.get('existing', False)]),
+        'errors': len([r for r in results if 'error' in r])
+    }), 201
+
 @app.route('/api/delete/<short_code>', methods=['DELETE'])
 def delete_url(short_code):
     """Delete a shortened URL - internal use"""
