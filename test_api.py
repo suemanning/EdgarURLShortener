@@ -15,7 +15,7 @@ def test_url_shortener():
     print()
     
     # Initialize client
-    client = URLShortenerClient("http://localhost:5001")
+    client = URLShortenerClient("https://edgarurlshortener.onrender.com")
     
     # Test 1: Shorten a URL
     print("Test 1: Shortening a URL")
@@ -102,11 +102,11 @@ def test_url_shortener():
 
 
 if __name__ == "__main__":
-    print("\nMake sure the server is running (python app.py) before running tests!\n")
+    print("\nTesting the deployed URL shortener at https://edgarurlshortener.onrender.com\n")
     time.sleep(1)
     
     try:
         test_url_shortener()
     except Exception as e:
         print(f"\nTest suite failed with error: {e}")
-        print("Make sure the server is running on http://localhost:5001")
+        print("Check if https://edgarurlshortener.onrender.com is accessible")
