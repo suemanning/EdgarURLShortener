@@ -7,7 +7,7 @@ No UI - API only for programmatic access
 from flask import Flask, request, redirect, jsonify
 import string
 import random
-import json
+import sqlite3
 import os
 from datetime import datetime
 import config
@@ -15,31 +15,53 @@ import config
 app = Flask(__name__)
 
 # Load configuration
-DATA_FILE = config.DATA_FILE
+DATABASE_PATH = config.DATABASE_PATH
 BASE_URL = config.BASE_URL
 SHORT_CODE_LENGTH = config.SHORT_CODE_LENGTH
 
-# Initialize or load URL database
-def load_urls():
-    """Load URL mappings from file"""
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r') as f:
-            return json.load(f)
-    return {}
+# Database initialization
+def init_database():
+    """Initialize SQLite database with schema"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS urls (
+            short_code TEXT PRIMARY KEY,
+            original_url TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            clicks INTEGER DEFAULT 0
+        )
+    ''')
+    
+    # Create index for fast lookup by original URL
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_original_url ON urls(original_url)
+    ''')
+    
+    conn.commit()
+    conn.close()
 
-def save_urls(url_map):
-    """Save URL mappings to file"""
-    with open(DATA_FILE, 'w') as f:
-        json.dump(url_map, f, indent=2)
+def get_db_connection():
+    """Get database connection"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row  # Enable dict-like access
+    return conn
 
-url_database = load_urls()
+# Initialize database on startup
+init_database()
 
 def generate_short_code():
     """Generate a unique short code for URL"""
     characters = string.ascii_letters + string.digits
+    conn = get_db_connection()
+    
     while True:
         short_code = ''.join(random.choices(characters, k=SHORT_CODE_LENGTH))
-        if short_code not in url_database:
+        cursor = conn.cursor()
+        cursor.execute('SELECT short_code FROM urls WHERE short_code = ?', (short_code,))
+        if cursor.fetchone() is None:
+            conn.close()
             return short_code
 
 @app.route('/api/shorten', methods=['POST'])
@@ -56,27 +78,33 @@ def shorten_url():
     if not original_url.startswith(('http://', 'https://')):
         original_url = 'https://' + original_url
     
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
     # Check if URL already exists
-    for code, info in url_database.items():
-        if info['original_url'] == original_url:
-            return jsonify({
-                'short_url': f"{BASE_URL}/{code}",
-                'short_code': code,
-                'original_url': original_url,
-                'existing': True
-            })
+    cursor.execute('SELECT short_code FROM urls WHERE original_url = ?', (original_url,))
+    existing = cursor.fetchone()
+    
+    if existing:
+        conn.close()
+        return jsonify({
+            'short_url': f"{BASE_URL}/{existing['short_code']}",
+            'short_code': existing['short_code'],
+            'original_url': original_url,
+            'existing': True
+        })
     
     # Generate new short code
     short_code = generate_short_code()
     
     # Store URL mapping
-    url_database[short_code] = {
-        'original_url': original_url,
-        'created_at': datetime.now().isoformat(),
-        'clicks': 0
-    }
+    cursor.execute('''
+        INSERT INTO urls (short_code, original_url, created_at, clicks)
+        VALUES (?, ?, ?, 0)
+    ''', (short_code, original_url, datetime.now().isoformat()))
     
-    save_urls(url_database)
+    conn.commit()
+    conn.close()
     
     return jsonify({
         'short_url': f"{BASE_URL}/{short_code}",
@@ -88,40 +116,64 @@ def shorten_url():
 @app.route('/<short_code>')
 def redirect_to_url(short_code):
     """Redirect short URL to original URL - external access"""
-    if short_code in url_database:
-        # Increment click counter
-        url_database[short_code]['clicks'] += 1
-        save_urls(url_database)
-        
-        original_url = url_database[short_code]['original_url']
-        return redirect(original_url)
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
+    cursor.execute('SELECT original_url FROM urls WHERE short_code = ?', (short_code,))
+    result = cursor.fetchone()
+    
+    if result:
+        # Increment click counter
+        cursor.execute('UPDATE urls SET clicks = clicks + 1 WHERE short_code = ?', (short_code,))
+        conn.commit()
+        conn.close()
+        
+        return redirect(result['original_url'])
+    
+    conn.close()
     return jsonify({'error': 'Short code not found'}), 404
 
 @app.route('/api/stats/<short_code>')
 def get_stats(short_code):
     """Get statistics for a shortened URL - internal use"""
-    if short_code in url_database:
-        return jsonify(url_database[short_code])
+    conn = get_db_connection()
+    cursor = conn.cursor()
     
+    cursor.execute('SELECT original_url, created_at, clicks FROM urls WHERE short_code = ?', (short_code,))
+    result = cursor.fetchone()
+    
+    if result:
+        stats = {
+            'original_url': result['original_url'],
+            'created_at': result['created_at'],
+            'clicks': result['clicks']
+        }
+        conn.close()
+        return jsonify(stats)
+    
+    conn.close()
     return jsonify({'error': 'Short code not found'}), 404
 
 @app.route('/api/list')
 def list_urls():
     """List all shortened URLs - internal use"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM urls ORDER BY created_at DESC')
+    rows = cursor.fetchall()
+    
     urls = []
-    for code, info in url_database.items():
+    for row in rows:
         urls.append({
-            'short_code': code,
-            'short_url': f"{BASE_URL}/{code}",
-            'original_url': info['original_url'],
-            'created_at': info['created_at'],
-            'clicks': info['clicks']
+            'short_code': row['short_code'],
+            'short_url': f"{BASE_URL}/{row['short_code']}",
+            'original_url': row['original_url'],
+            'created_at': row['created_at'],
+            'clicks': row['clicks']
         })
     
-    # Sort by creation date (newest first)
-    urls.sort(key=lambda x: x['created_at'], reverse=True)
-    
+    conn.close()
     return jsonify(urls)
 
 @app.route('/api/bulk-shorten', methods=['POST'])
@@ -141,6 +193,8 @@ def bulk_shorten_urls():
     if len(data['urls']) > 100:  # Limit to prevent abuse
         return jsonify({'error': 'Maximum 100 URLs allowed per request'}), 400
     
+    conn = get_db_connection()
+    cursor = conn.cursor()
     results = []
     
     for original_url in data['urls']:
@@ -156,16 +210,13 @@ def bulk_shorten_urls():
             original_url = 'https://' + original_url
         
         # Check if URL already exists
-        existing_code = None
-        for code, info in url_database.items():
-            if info['original_url'] == original_url:
-                existing_code = code
-                break
+        cursor.execute('SELECT short_code FROM urls WHERE original_url = ?', (original_url,))
+        existing = cursor.fetchone()
         
-        if existing_code:
+        if existing:
             results.append({
-                'short_url': f"{BASE_URL}/{existing_code}",
-                'short_code': existing_code,
+                'short_url': f"{BASE_URL}/{existing['short_code']}",
+                'short_code': existing['short_code'],
                 'original_url': original_url,
                 'existing': True
             })
@@ -174,11 +225,10 @@ def bulk_shorten_urls():
             short_code = generate_short_code()
             
             # Store URL mapping
-            url_database[short_code] = {
-                'original_url': original_url,
-                'created_at': datetime.now().isoformat(),
-                'clicks': 0
-            }
+            cursor.execute('''
+                INSERT INTO urls (short_code, original_url, created_at, clicks)
+                VALUES (?, ?, ?, 0)
+            ''', (short_code, original_url, datetime.now().isoformat()))
             
             results.append({
                 'short_url': f"{BASE_URL}/{short_code}",
@@ -187,8 +237,9 @@ def bulk_shorten_urls():
                 'existing': False
             })
     
-    # Save all changes at once
-    save_urls(url_database)
+    # Commit all changes at once
+    conn.commit()
+    conn.close()
     
     return jsonify({
         'results': results,
@@ -201,11 +252,17 @@ def bulk_shorten_urls():
 @app.route('/api/delete/<short_code>', methods=['DELETE'])
 def delete_url(short_code):
     """Delete a shortened URL - internal use"""
-    if short_code in url_database:
-        del url_database[short_code]
-        save_urls(url_database)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('DELETE FROM urls WHERE short_code = ?', (short_code,))
+    
+    if cursor.rowcount > 0:
+        conn.commit()
+        conn.close()
         return jsonify({'message': 'URL deleted successfully'})
     
+    conn.close()
     return jsonify({'error': 'Short code not found'}), 404
 
 if __name__ == '__main__':

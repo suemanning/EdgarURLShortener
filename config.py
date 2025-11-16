@@ -14,4 +14,4 @@ BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5001')
 SHORT_CODE_LENGTH = 6  # Length of generated short codes
 
 # Storage Configuration
-DATA_FILE = 'urls.json'  # File to store URL mappings
+DATABASE_PATH = 'urls.db'  # SQLite database file

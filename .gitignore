@@ -120,5 +120,8 @@ Thumbs.db
 
 # Project specific
 urls.json
+urls.db
+*.db
+*.db-journal
 *.json
 !requirements.txt
